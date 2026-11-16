@@ -8,6 +8,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
+        // 原生窗口背景设为黑色，确保启动/边缘/过滚时绝不露出默认浅色背景
+        window?.backgroundColor = .black
         window?.rootViewController = CAPBridgeViewController()
         window?.makeKeyAndVisible()
 

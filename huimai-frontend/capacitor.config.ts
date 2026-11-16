@@ -7,8 +7,10 @@ const config: CapacitorConfig = {
   // Vite 构建产物目录
   webDir: 'dist',
   ios: {
-    // 让 WebView 内容自动考虑安全区，配合 CSS env(safe-area-inset-*)
-    contentInset: 'always'
+    // 视频类 App 采用 edge-to-edge 全屏：WebView 内容延伸到状态栏与 Home Indicator 下方，
+    // 避免 contentInset=always 在顶部/底部留出安全区空白（露出 WebView 背景形成白边）。
+    // 悬浮底栏、进度条等已各自用 env(safe-area-inset-*) 做安全区适配。
+    contentInset: 'never'
   }
 }
 

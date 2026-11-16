@@ -1,5 +1,11 @@
 <template>
-  <div class="swipe-item">
+  <div
+    class="swipe-item"
+    @touchstart="onLongPressStart"
+    @touchmove="onLongPressMove"
+    @touchend="onLongPressEnd"
+    @touchcancel="onLongPressEnd"
+  >
     <video
       ref="videoRef"
       class="video"
@@ -16,15 +22,33 @@
       @loadedmetadata="detectOrientation"
     />
 
+    <!-- 长按倍速提示 -->
+    <div v-if="isFast" class="fast-hint">
+      <van-icon name="fast-forward" />
+      <span>1.25 倍速播放中</span>
+    </div>
+
     <!-- 暂停遮罩图标 -->
     <div v-if="!playing" class="play-icon" @click="togglePlay">
       <van-icon name="play" />
     </div>
 
-    <!-- 底部播放进度条（紧贴底栏上沿）：仅当前激活视频显示，确保离开信息流时绝不残留 -->
-    <div v-show="active" class="progress-bar">
-      <div class="progress-played" :style="{ width: progress + '%' }">
-        <span class="progress-thumb"></span>
+    <!-- 底部播放进度条（紧贴底栏上沿）：仅当前激活视频显示。
+         视觉为 2px 细线，外层加高触摸热区，支持点击定位与拖动 seek -->
+    <div
+      v-show="active"
+      ref="progressRef"
+      class="progress-touch"
+      @touchstart.stop
+      @pointerdown="onSeekStart"
+      @pointermove="onSeekMove"
+      @pointerup="onSeekEnd"
+      @pointercancel="onSeekEnd"
+    >
+      <div class="progress-bar">
+        <div class="progress-played" :style="{ width: displayProgress + '%' }">
+          <span class="progress-thumb" :class="{ dragging: isSeeking }"></span>
+        </div>
       </div>
     </div>
 
@@ -172,6 +196,16 @@ const videoRef = ref<HTMLVideoElement>()
 const playing = ref(false)
 const commentVisible = ref(false)
 const progress = ref(0)
+// 进度条拖动（seek）状态
+const progressRef = ref<HTMLElement>()
+const isSeeking = ref(false)
+const seekRatio = ref(0)
+// 实际显示的进度：拖动中用手指位置，否则用播放回调进度
+const displayProgress = computed(() =>
+  isSeeking.value ? seekRatio.value * 100 : progress.value
+)
+// 长按倍速状态
+const isFast = ref(false)
 // 是否为横屏视频（宽 > 高），由视频元数据动态判断，用于切换显示方式
 const isLandscape = ref(false)
 // 横屏视频自身宽高比（如 "1280 / 720"），用于让横向卡片精确贴合视频、几乎无黑边
@@ -212,10 +246,13 @@ watch(
     } else {
       el.pause()
       el.currentTime = 0
+      el.playbackRate = 1.0
       playing.value = false
       commentVisible.value = false
       actionPanelVisible.value = false
       progress.value = 0
+      isSeeking.value = false
+      isFast.value = false
     }
   }
 )
@@ -251,6 +288,11 @@ onUnmounted(() => {
 })
 
 function togglePlay() {
+  // 长按倍速结束时浏览器仍会派发 click，这里吞掉，避免误触发暂停/播放
+  if (longPressFired) {
+    longPressFired = false
+    return
+  }
   const el = videoRef.value
   if (!el) {
     return
@@ -269,7 +311,10 @@ function onTimeUpdate() {
   if (!el || !el.duration) {
     return
   }
-  progress.value = (el.currentTime / el.duration) * 100
+  // 手指拖动 seek 时以手指位置为准，忽略播放回调，避免进度来回跳
+  if (!isSeeking.value) {
+    progress.value = (el.currentTime / el.duration) * 100
+  }
   // 兜底：播放时元数据必然可用，防止 loadedmetadata 事件错过导致横竖屏误判
   detectOrientation()
 }
@@ -281,6 +326,119 @@ function detectOrientation() {
     isLandscape.value = el.videoWidth > el.videoHeight
     videoRatio.value = `${el.videoWidth} / ${el.videoHeight}`
   }
+}
+
+// ============ 进度条：点击定位 + 拖动 seek ============
+// 根据指针在进度条上的横向位置计算 0~1 比例
+function pointerRatio(e: PointerEvent) {
+  const bar = progressRef.value
+  if (!bar) {
+    return 0
+  }
+  const rect = bar.getBoundingClientRect()
+  const ratio = (e.clientX - rect.left) / rect.width
+  return Math.min(1, Math.max(0, ratio))
+}
+
+function onSeekStart(e: PointerEvent) {
+  const el = videoRef.value
+  if (!el || !el.duration) {
+    return
+  }
+  isSeeking.value = true
+  seekRatio.value = pointerRatio(e)
+  // 捕获指针，后续 move/up 即使滑出进度条也能持续收到
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+
+function onSeekMove(e: PointerEvent) {
+  if (!isSeeking.value) {
+    return
+  }
+  seekRatio.value = pointerRatio(e)
+}
+
+function onSeekEnd(e: PointerEvent) {
+  if (!isSeeking.value) {
+    return
+  }
+  const el = videoRef.value
+  seekRatio.value = pointerRatio(e)
+  if (el && el.duration) {
+    el.currentTime = seekRatio.value * el.duration
+    progress.value = seekRatio.value * 100
+  }
+  isSeeking.value = false
+}
+
+// ============ 长按屏幕：1.25 倍速 ============
+// 非响应式手势变量（无需触发渲染）
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let longPressFired = false
+let touchStartX = 0
+let touchStartY = 0
+const LONG_PRESS_MS = 500
+const MOVE_CANCEL_PX = 10
+
+function onLongPressStart(e: TouchEvent) {
+  // 仅单指长按生效，多指（如系统手势）不处理
+  if (e.touches.length !== 1) {
+    return
+  }
+  const t = e.touches[0]
+  touchStartX = t.clientX
+  touchStartY = t.clientY
+  longPressFired = false
+  longPressTimer = setTimeout(() => {
+    longPressFired = true
+    startFast()
+  }, LONG_PRESS_MS)
+}
+
+function onLongPressMove(e: TouchEvent) {
+  if (!longPressTimer) {
+    return
+  }
+  const t = e.touches[0]
+  // 手指明显移动说明是在上下滑动切换视频，取消长按
+  if (
+    Math.abs(t.clientX - touchStartX) > MOVE_CANCEL_PX ||
+    Math.abs(t.clientY - touchStartY) > MOVE_CANCEL_PX
+  ) {
+    clearLongPressTimer()
+  }
+}
+
+function onLongPressEnd() {
+  clearLongPressTimer()
+  if (isFast.value) {
+    stopFast()
+  }
+}
+
+function clearLongPressTimer() {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
+function startFast() {
+  const el = videoRef.value
+  // 仅在播放中快进；暂停状态不触发倍速
+  if (!el || el.paused) {
+    return
+  }
+  el.playbackRate = 1.25
+  isFast.value = true
+}
+
+function stopFast() {
+  const el = videoRef.value
+  if (el) {
+    el.playbackRate = 1.0
+  }
+  isFast.value = false
 }
 
 async function handleLike() {
@@ -448,18 +606,28 @@ function sourceLabel(t: string) {
   font-size: 30px;
   color: #fff;
 }
-.progress-bar {
+/* 外层触摸热区：定位与安全区适配在这里，加高到 28px 便于手指操作，
+   视觉轨道在内部居中仍为 2px；touch-action:none 阻止拖动时页面滚动 */
+.progress-touch {
   position: absolute;
   left: 0;
   right: 0;
   /* 上移到悬浮底栏的上沿：底栏高度 + 真机底部安全区 */
   bottom: calc(var(--tabbar-height) + constant(safe-area-inset-bottom));
   bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom));
+  height: 28px;
+  display: flex;
+  align-items: center;
+  z-index: 22;
+  touch-action: none;
+  cursor: pointer;
+}
+.progress-bar {
+  position: relative;
+  width: 100%;
   height: 2px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
-  z-index: 22;
-  pointer-events: none;
 }
 .progress-played {
   position: relative;
@@ -477,6 +645,34 @@ function sourceLabel(t: string) {
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: width 0.12s ease, height 0.12s ease;
+}
+/* 拖动中圆点放大，给出明确的抓取反馈 */
+.progress-thumb.dragging {
+  width: 13px;
+  height: 13px;
+  right: -6.5px;
+}
+
+/* 长按倍速提示：居中偏下的半透明胶囊 */
+.fast-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font-size: 14px;
+  z-index: 23;
+  pointer-events: none;
+}
+.fast-hint .van-icon {
+  font-size: 18px;
 }
 
 /* 一体化面板：标题 + 评论列表 + 底部操作条 */
