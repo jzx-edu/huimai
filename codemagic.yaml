@@ -80,3 +80,45 @@ workflows:
           xcode-project build-ipa --project App.xcodeproj --scheme App
     artifacts:
       - huimai-frontend/ios/App/build/ios/ipa/*.ipa
+
+  # ============ 原生 SwiftUI（第一阶段）：免费无签名构建 ============
+  # 工程由 XcodeGen 生成，Windows 本地不需要 Xcode
+  huimai-ios-native-free:
+    name: 回脉 iOS 原生 SwiftUI 免费无签名
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+    scripts:
+      - name: 准备 XcodeGen
+        script: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+      - name: 生成 Xcode 工程
+        working_directory: huimai-ios-native
+        script: |
+          xcodegen generate
+      - name: 无签名归档
+        working_directory: huimai-ios-native
+        script: |
+          xcodebuild archive \
+            -project Huimai.xcodeproj \
+            -scheme Huimai \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Huimai.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+      - name: 打包 unsigned IPA
+        working_directory: huimai-ios-native
+        script: |
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -r build/Huimai.xcarchive/Products/Applications/Huimai.app build/Payload/
+          cd build
+          zip -r ../huimai-native-unsigned.ipa Payload
+    artifacts:
+      - huimai-ios-native/huimai-native-unsigned.ipa
