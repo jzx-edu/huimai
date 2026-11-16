@@ -46,11 +46,8 @@ workflows:
           (cd build && zip -r ../huimai-unsigned.ipa Payload)
     artifacts:
       - huimai-frontend/ios/App/huimai-unsigned.ipa
-    publishing:
-      email:
-        # 改成你自己的邮箱，构建完会收到下载链接
-        recipients:
-          - your-email@example.com
+    # 构建完成后直接在 Codemagic 构建详情页下载 huimai-unsigned.ipa；
+    # 如需邮件通知，可在此添加 publishing: email: recipients: [你的邮箱]
 
   # ============ 付费：自动签名（以后 TestFlight / 上架时再用）============
   huimai-ios-signed:
