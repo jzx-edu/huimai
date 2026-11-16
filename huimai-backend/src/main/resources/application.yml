@@ -1,0 +1,80 @@
+server:
+  port: 9090
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: huimai
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/huimai?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 133235
+    hikari:
+      minimum-idle: 5
+      maximum-pool: 20
+      idle-timeout: 30000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      database: 0
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 512MB
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# 回脉业务配置
+huimai:
+  jwt:
+    secret: huimai-islamic-civilization-shortvideo-platform-jwt-secret-key-2026
+    # 访问令牌有效期（毫秒）：24 小时
+    expiration: 86400000
+  # 本地文件存储根目录
+  storage:
+    root: D:/回脉/storage
+    video-dir: video
+    cover-dir: cover
+    avatar-dir: avatar
+  # FFmpeg 可执行文件路径（留空则尝试从 PATH 查找；未安装时仅原样存储，不转码）
+  ffmpeg:
+    path: ""
+  # 视频静态资源访问前缀
+  resource:
+    prefix: /media/**
+
+logging:
+  level:
+    com.huimai: debug
+    org.springframework.security: info
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn

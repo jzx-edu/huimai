@@ -1,0 +1,85 @@
+# Codemagic 云端 Mac 构建配置
+# 免费侧载：用 huimai-ios-free 工作流产出“无签名 ipa”，再用 Sideloadly 在本地用免费 Apple ID 重签名
+# 付费上架：用 huimai-ios-signed 工作流（需先在 Codemagic 网页端配置自动签名）
+workflows:
+  # ============ 免费：无签名构建（不需要 99 美元苹果账号）============
+  huimai-ios-free:
+    name: 回脉 iOS 免费无签名
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+      node: 22
+    cache:
+      cache_paths:
+        - huimai-frontend/node_modules
+    scripts:
+      # 1. 构建 Web 静态资源（自动读取 .env.production）
+      - name: 构建 Web 资源
+        working_directory: huimai-frontend
+        script: |
+          npm ci
+          npm run build
+      # 2. 同步到原生工程（Capacitor 8 用 Swift Package Manager，无需 pod install）
+      - name: Capacitor 同步
+        working_directory: huimai-frontend
+        script: |
+          npx cap sync ios
+      # 3. 归档但不签名
+      - name: 无签名归档
+        working_directory: huimai-frontend/ios/App
+        script: |
+          xcodebuild archive \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive \
+            CODE_SIGNING_ALLOWED=NO
+      # 4. 把 .app 手工打包成 unsigned ipa（Sideloadly 会重新签名）
+      - name: 打包 unsigned IPA
+        working_directory: huimai-frontend/ios/App
+        script: |
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -r build/App.xcarchive/Products/Applications/App.app build/Payload/
+          (cd build && zip -r ../huimai-unsigned.ipa Payload)
+    artifacts:
+      - huimai-frontend/ios/App/huimai-unsigned.ipa
+    publishing:
+      email:
+        # 改成你自己的邮箱，构建完会收到下载链接
+        recipients:
+          - your-email@example.com
+
+  # ============ 付费：自动签名（以后 TestFlight / 上架时再用）============
+  huimai-ios-signed:
+    name: 回脉 iOS 自动签名
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+      node: 22
+    cache:
+      cache_paths:
+        - huimai-frontend/node_modules
+    scripts:
+      - name: 构建 Web 资源
+        working_directory: huimai-frontend
+        script: |
+          npm ci
+          npm run build
+      - name: Capacitor 同步
+        working_directory: huimai-frontend
+        script: |
+          npx cap sync ios
+      - name: 配置自动签名
+        working_directory: huimai-frontend/ios/App
+        script: |
+          xcode-project use-profiles
+      - name: 构建 IPA
+        working_directory: huimai-frontend/ios/App
+        script: |
+          xcode-project build-ipa --project App.xcodeproj --scheme App
+    artifacts:
+      - huimai-frontend/ios/App/build/ios/ipa/*.ipa

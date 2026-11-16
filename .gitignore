@@ -1,0 +1,19 @@
+# 依赖
+node_modules/
+# 前端构建产物（云端会重新构建）
+huimai-frontend/dist/
+# 后端构建产物
+huimai-backend/target/
+# 日志
+*.log
+# 安装包下载目录
+downloads/
+# 运行时媒体存储（视频/封面/头像，本地与后端运行时生成）
+storage/
+# 本地环境与系统文件
+.env.local
+.DS_Store
+Thumbs.db
+# IDE
+.idea/
+.vscode/
